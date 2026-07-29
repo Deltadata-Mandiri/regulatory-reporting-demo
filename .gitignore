@@ -1,0 +1,18 @@
+# Node
+node_modules/
+.npm/
+
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Amplify Gen 2
+.amplify/
+amplify_outputs.json
+amplify_outputs*
+**/amplify_outputs.json
+
+# Local
+*.log
+.DS_Store

@@ -1,0 +1,269 @@
+{
+  "name": "breach_remediation",
+  "description": "Orchestrator and child. Handles a prudential limit breach. Recomputes the ratios through the prudential_ratios child rather than trusting the caller, maps each breach code to the remedial actions and regulatory notification deadline the governing POJK/PBI demands, then routes by severity: a critical breach goes to the Board with a mandatory OJK notification, a high breach to the Risk & Compliance Committee, anything lower to monitoring. An LLM drafts the action plan and the notification letter, which is rendered to PDF.",
+  "version": 1,
+  "schemaVersion": 2,
+  "restartable": true,
+  "ownerEmail": "",
+  "timeoutPolicy": "ALERT_ONLY",
+  "timeoutSeconds": 0,
+  "inputParameters": [
+    "caseId",
+    "triggerSource",
+    "bankName",
+    "bankCode",
+    "period",
+    "asOfDate",
+    "riskProfile",
+    "kbmi",
+    "countercyclicalBufferPct",
+    "dsibBucket",
+    "cet1Capital",
+    "at1Capital",
+    "tier2Capital",
+    "rwaCredit",
+    "rwaMarket",
+    "rwaOperational",
+    "totalLoans",
+    "kol3Balance",
+    "kol4Balance",
+    "kol5Balance",
+    "lossAllowance",
+    "thirdPartyFunds",
+    "securitiesIssued",
+    "corporateBondsHeld",
+    "hqla",
+    "netCashOutflow30d",
+    "availableStableFunding",
+    "requiredStableFunding",
+    "gwmRupiahPct",
+    "gwmRequiredPct",
+    "largeExposures"
+  ],
+  "variables": {
+    "remediationStatus": "PENDING",
+    "handlingTier": "None",
+    "approvedBy": "",
+    "approvalNote": "",
+    "targetCureDate": ""
+  },
+  "tasks": [
+    {
+      "name": "recalculate_ratios",
+      "taskReferenceName": "ratios_ref",
+      "type": "SUB_WORKFLOW",
+      "subWorkflowParam": {
+        "name": "prudential_ratios",
+        "version": 1
+      },
+      "inputParameters": {
+        "calculationContext": "BREACH_REMEDIATION",
+        "bankName": "${workflow.input.bankName}",
+        "period": "${workflow.input.period}",
+        "asOfDate": "${workflow.input.asOfDate}",
+        "riskProfile": "${workflow.input.riskProfile}",
+        "kbmi": "${workflow.input.kbmi}",
+        "countercyclicalBufferPct": "${workflow.input.countercyclicalBufferPct}",
+        "dsibBucket": "${workflow.input.dsibBucket}",
+        "cet1Capital": "${workflow.input.cet1Capital}",
+        "at1Capital": "${workflow.input.at1Capital}",
+        "tier2Capital": "${workflow.input.tier2Capital}",
+        "rwaCredit": "${workflow.input.rwaCredit}",
+        "rwaMarket": "${workflow.input.rwaMarket}",
+        "rwaOperational": "${workflow.input.rwaOperational}",
+        "totalLoans": "${workflow.input.totalLoans}",
+        "kol3Balance": "${workflow.input.kol3Balance}",
+        "kol4Balance": "${workflow.input.kol4Balance}",
+        "kol5Balance": "${workflow.input.kol5Balance}",
+        "lossAllowance": "${workflow.input.lossAllowance}",
+        "thirdPartyFunds": "${workflow.input.thirdPartyFunds}",
+        "securitiesIssued": "${workflow.input.securitiesIssued}",
+        "corporateBondsHeld": "${workflow.input.corporateBondsHeld}",
+        "hqla": "${workflow.input.hqla}",
+        "netCashOutflow30d": "${workflow.input.netCashOutflow30d}",
+        "availableStableFunding": "${workflow.input.availableStableFunding}",
+        "requiredStableFunding": "${workflow.input.requiredStableFunding}",
+        "gwmRupiahPct": "${workflow.input.gwmRupiahPct}",
+        "gwmRequiredPct": "${workflow.input.gwmRequiredPct}",
+        "largeExposures": "${workflow.input.largeExposures}"
+      }
+    },
+    {
+      "name": "stringify_breaches",
+      "taskReferenceName": "stringify_breaches_ref",
+      "type": "JSON_JQ_TRANSFORM",
+      "inputParameters": {
+        "breaches": "${ratios_ref.output.breaches}",
+        "queryExpression": "{breaches:(.breaches // [])} | tojson"
+      }
+    },
+    {
+      "name": "build_action_plan",
+      "taskReferenceName": "plan_ref",
+      "type": "INLINE",
+      "inputParameters": {
+        "evaluatorType": "graaljs",
+        "payload": "${stringify_breaches_ref.output.result}",
+        "worstSeverity": "${ratios_ref.output.worstSeverity}",
+        "complianceStatus": "${ratios_ref.output.complianceStatus}",
+        "mandatoryNotification": "${ratios_ref.output.mandatoryNotification}",
+        "asOfDate": "${workflow.input.asOfDate}",
+        "expression": "(function(){var data={};try{data=JSON.parse($.payload)||{};}catch(e){data={};}var breaches=data.breaches||[];var worst=String($.worstSeverity||'NONE');var mandatory=($.mandatoryNotification===true||String($.mandatoryNotification)==='true');var toDays=function(s){var p=String(s||'').split('-');if(p.length!==3){return null;}return Date.UTC(Number(p[0]),Number(p[1])-1,Number(p[2]))/86400000;};var fromDays=function(d){if(d===null){return '';}var dt=new Date(d*86400000);var p=function(n){return (n<10?'0':'')+n;};return dt.getUTCFullYear()+'-'+p(dt.getUTCMonth()+1)+'-'+p(dt.getUTCDate());};var ACTIONS={CAR_MIN:['Menyusun rencana pemenuhan permodalan (capital restoration plan)','Menghentikan sementara distribusi dividen dan pembayaran bonus','Menurunkan ATMR melalui penajaman portofolio berisiko tinggi','Mengkaji opsi penambahan modal disetor dari pemegang saham pengendali'],CAR_BUFFER:['Membatasi distribusi laba sesuai persentase konservasi yang berlaku','Menyusun rencana pemulihan buffer permodalan','Menahan pertumbuhan aset berisiko sampai buffer pulih'],CET1_MIN:['Memperkuat modal inti utama melalui laba ditahan dan penambahan modal','Menghentikan distribusi laba sampai CET1 memenuhi ketentuan'],TIER1_MIN:['Memperkuat modal inti melalui penambahan modal disetor','Mengkaji penerbitan instrumen modal inti tambahan yang memenuhi kriteria'],LCR_MIN:['Mengaktifkan Contingency Funding Plan','Menyampaikan laporan LCR harian kepada otoritas sampai rasio pulih','Menambah porsi aset likuid berkualitas tinggi','Memperpanjang profil jatuh tempo pendanaan'],NSFR_MIN:['Memperpanjang tenor pendanaan dan menaikkan porsi pendanaan stabil','Mengurangi ketergantungan pada pendanaan jangka pendek'],NPL_NET:['Menyusun rencana penyelesaian kredit bermasalah per debitur','Menambah pencadangan CKPN sesuai hasil evaluasi kualitas aktiva','Mempercepat restrukturisasi dan hapus buku sesuai ketentuan','Memperketat kriteria pemberian kredit pada sektor terdampak'],NPL_GROSS:['Mempercepat penagihan dan restrukturisasi kredit kolektibilitas 3-5','Mengkaji ulang selera risiko pada sektor penyumbang NPL terbesar'],BMPK_SINGLE:['Menurunkan eksposur debitur sampai di bawah 20% dari modal','Menghentikan pemberian fasilitas baru kepada debitur terkait pelampauan','Menyusun jadwal penurunan eksposur dengan target waktu yang terukur'],BMPK_GROUP:['Menurunkan eksposur kelompok peminjam sampai di bawah 25% dari modal','Meninjau ulang pemetaan keterkaitan kelompok peminjam'],BMPK_RELATED:['Menurunkan eksposur pihak terkait sampai di bawah 10% dari modal','Menghentikan pemberian fasilitas baru kepada pihak terkait','Melaporkan pelampauan kepada otoritas sesuai ketentuan BMPK'],RIM_LOW:['Mendorong penyaluran kredit produktif sesuai target intermediasi','Menyiapkan konsekuensi disinsentif GWM dalam proyeksi likuiditas'],RIM_HIGH:['Menyeimbangkan pertumbuhan kredit terhadap penghimpunan DPK','Menyiapkan konsekuensi disinsentif GWM dalam proyeksi likuiditas'],GWM_MIN:['Memenuhi kekurangan saldo giro pada Bank Indonesia','Memperbaiki proyeksi arus kas harian dan disiplin penempatan'],RWA_ZERO:['Melakukan penelusuran data permodalan dan ATMR pada sistem sumber','Menunda penyampaian angka permodalan sampai data tervalidasi']};var actions=[];var seen={};var regs=[];var regSeen={};for(var i=0;i<breaches.length;i++){var b=breaches[i]||{};var code=String(b.code||'');var list=ACTIONS[code]||['Menyusun langkah perbaikan spesifik atas '+String(b.metric||code)];for(var j=0;j<list.length;j++){if(!seen[list[j]]){seen[list[j]]=true;actions.push(list[j]);}}var reg=String(b.regulation||'');if(reg&&!regSeen[reg]){regSeen[reg]=true;regs.push(reg);}}var tier;var notifyDays;var planDays;var cureDays;if(worst==='CRITICAL'){tier='BOARD';notifyDays=1;planDays=5;cureDays=90;}else if(worst==='HIGH'){tier='COMMITTEE';notifyDays=5;planDays=14;cureDays=180;}else if(worst==='MEDIUM'){tier='MONITOR';notifyDays=10;planDays=30;cureDays=180;}else{tier='MONITOR';notifyDays=null;planDays=null;cureDays=null;}var base=toDays($.asOfDate);var notifyBy=(base!==null&&notifyDays!==null)?fromDays(base+notifyDays):'';var planBy=(base!==null&&planDays!==null)?fromDays(base+planDays):'';var cureBy=(base!==null&&cureDays!==null)?fromDays(base+cureDays):'';var owners={BOARD:'Direksi dan Dewan Komisaris',COMMITTEE:'Komite Manajemen Risiko dan Satuan Kerja Kepatuhan',MONITOR:'Satuan Kerja Manajemen Risiko'};return {handlingTier:tier,owner:owners[tier],breachCount:breaches.length,worstSeverity:worst,mandatoryNotification:mandatory,notificationDeadline:notifyBy,actionPlanDeadline:planBy,targetCureDate:cureBy,notifyWithinDays:notifyDays,actionPlanWithinDays:planDays,cureWithinDays:cureDays,remedialActions:actions,regulations:regs};})();"
+      }
+    },
+    {
+      "name": "escalation_router",
+      "taskReferenceName": "escalation_router_ref",
+      "type": "SWITCH",
+      "evaluatorType": "value-param",
+      "expression": "tier",
+      "inputParameters": {
+        "tier": "${plan_ref.output.result.handlingTier}"
+      },
+      "decisionCases": {
+        "BOARD": [
+          {
+            "name": "board_approval",
+            "taskReferenceName": "board_ref",
+            "type": "WAIT",
+            "inputParameters": {
+              "caseId": "${workflow.input.caseId}",
+              "escalationTier": "BOARD",
+              "worstSeverity": "${ratios_ref.output.worstSeverity}",
+              "breachSummary": "${ratios_ref.output.breachSummary}",
+              "notificationDeadline": "${plan_ref.output.result.notificationDeadline}",
+              "actionPlanDeadline": "${plan_ref.output.result.actionPlanDeadline}",
+              "owner": "${plan_ref.output.result.owner}",
+              "instruction": "Persetujuan Direksi diperlukan atas rencana tindak dan surat pemberitahuan kepada otoritas"
+            }
+          },
+          {
+            "name": "set_board_outcome",
+            "taskReferenceName": "set_board_ref",
+            "type": "SET_VARIABLE",
+            "inputParameters": {
+              "remediationStatus": "ACTION_PLAN_APPROVED_BY_BOARD",
+              "handlingTier": "BOARD",
+              "approvedBy": "${board_ref.output.approvedBy}",
+              "approvalNote": "${board_ref.output.note}",
+              "targetCureDate": "${plan_ref.output.result.targetCureDate}"
+            }
+          }
+        ],
+        "COMMITTEE": [
+          {
+            "name": "committee_approval",
+            "taskReferenceName": "committee_ref",
+            "type": "WAIT",
+            "inputParameters": {
+              "caseId": "${workflow.input.caseId}",
+              "escalationTier": "COMMITTEE",
+              "worstSeverity": "${ratios_ref.output.worstSeverity}",
+              "breachSummary": "${ratios_ref.output.breachSummary}",
+              "actionPlanDeadline": "${plan_ref.output.result.actionPlanDeadline}",
+              "owner": "${plan_ref.output.result.owner}",
+              "instruction": "Persetujuan Komite Manajemen Risiko diperlukan atas rencana tindak"
+            }
+          },
+          {
+            "name": "set_committee_outcome",
+            "taskReferenceName": "set_committee_ref",
+            "type": "SET_VARIABLE",
+            "inputParameters": {
+              "remediationStatus": "ACTION_PLAN_APPROVED_BY_COMMITTEE",
+              "handlingTier": "COMMITTEE",
+              "approvedBy": "${committee_ref.output.approvedBy}",
+              "approvalNote": "${committee_ref.output.note}",
+              "targetCureDate": "${plan_ref.output.result.targetCureDate}"
+            }
+          }
+        ],
+        "MONITOR": [
+          {
+            "name": "set_monitoring",
+            "taskReferenceName": "set_monitor_ref",
+            "type": "SET_VARIABLE",
+            "inputParameters": {
+              "remediationStatus": "UNDER_MONITORING",
+              "handlingTier": "MONITOR",
+              "approvedBy": "Satuan Kerja Manajemen Risiko",
+              "approvalNote": "Tidak memerlukan persetujuan komite - dipantau pada siklus pelaporan berikutnya",
+              "targetCureDate": "${plan_ref.output.result.targetCureDate}"
+            }
+          }
+        ]
+      },
+      "defaultCase": []
+    },
+    {
+      "name": "stringify_plan",
+      "taskReferenceName": "plan_ctx_ref",
+      "type": "JSON_JQ_TRANSFORM",
+      "inputParameters": {
+        "remedialActions": "${plan_ref.output.result.remedialActions}",
+        "regulations": "${plan_ref.output.result.regulations}",
+        "queryExpression": "{actionsText:(if ((.remedialActions // [])|length)>0 then ((.remedialActions // [])|to_entries|map(((.key+1)|tostring)+\". \"+.value)|join(\" | \")) else \"Tidak ada\" end),regulationsText:(if ((.regulations // [])|length)>0 then ((.regulations // [])|join(\"; \")) else \"Tidak ada\" end)}"
+      }
+    },
+    {
+      "name": "draft_action_plan",
+      "taskReferenceName": "draft_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "inputParameters": {
+        "llmProvider": "openai",
+        "model": "gpt-4o-mini",
+        "temperature": 0.2,
+        "maxTokens": 1000,
+        "jsonOutput": false,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are the head of Risk & Compliance at an Indonesian commercial bank. Write a formal remediation document in Indonesian, in Markdown, with two sections: '## Rencana Tindak' (the action plan) and, ONLY IF mandatory notification is required, '## Rancangan Surat Pemberitahuan kepada Otoritas' (a draft notification letter to the regulator). Use ONLY the breaches, ratios, actions, regulations and dates supplied - never invent a figure, a regulation, a commitment or a date. Present the action plan as a numbered list with the responsible owner and the stated deadlines. State the breach plainly; do not minimise it or speculate that it may resolve itself. Do NOT promise a specific future ratio outcome. Do NOT state that the regulator has been informed, has responded, or has granted any relief - the notification is a draft awaiting approval. Be concise (under 450 words). Do NOT include letterhead, postal addresses, a date line, or ANY bracketed placeholder such as [Tanggal] or [Nama Direktur]. Output raw Markdown only - no code fences, no commentary before or after."
+          },
+          {
+            "role": "user",
+            "message": "Susun dokumen rencana tindak atas pelampauan rasio prudensial. Seluruh nilai uang dalam Rupiah dengan pemisah ribuan titik.\n- Nomor kasus: ${workflow.input.caseId}\n- Pemicu: ${workflow.input.triggerSource}\n- Bank: ${workflow.input.bankName} (sandi ${workflow.input.bankCode})\n- Periode data: ${workflow.input.period}, posisi ${workflow.input.asOfDate}\n- Tingkat penanganan: ${plan_ref.output.result.handlingTier}\n- Penanggung jawab: ${plan_ref.output.result.owner}\n- Tingkat keparahan tertinggi: ${ratios_ref.output.worstSeverity}\n- Status kepatuhan: ${ratios_ref.output.complianceStatus}\n- Jumlah pelampauan: ${ratios_ref.output.breachCount}\n- Rincian pelampauan: ${ratios_ref.output.breachSummary}\n- Rasio mendekati ambang: ${ratios_ref.output.watchSummary}\n- KPMM/CAR: ${ratios_ref.output.car}% terhadap kewajiban ${ratios_ref.output.requiredCar}% (minimum profil risiko ${ratios_ref.output.minCarByProfile}%)\n- Surplus/defisit modal terhadap kewajiban: ${ratios_ref.output.capitalSurplusIDR}\n- CET1 ${ratios_ref.output.cet1Ratio}%, Modal Inti ${ratios_ref.output.tier1Ratio}%\n- NPL gross ${ratios_ref.output.nplGross}%, NPL net ${ratios_ref.output.nplNet}%, coverage CKPN ${ratios_ref.output.coverageRatio}%\n- LCR ${ratios_ref.output.lcr}%, NSFR ${ratios_ref.output.nsfr}%, RIM ${ratios_ref.output.rim}%\n- BMPK pihak terkait ${ratios_ref.output.relatedPartyPct}% dari modal, eksposur terbesar ${ratios_ref.output.largestExposurePct}% dari modal\n- Wajib pemberitahuan kepada otoritas: ${plan_ref.output.result.mandatoryNotification}\n- Batas waktu pemberitahuan: ${plan_ref.output.result.notificationDeadline}\n- Batas waktu rencana tindak: ${plan_ref.output.result.actionPlanDeadline}\n- Target pemulihan: ${plan_ref.output.result.targetCureDate}\n- Ketentuan yang dilampaui: ${plan_ctx_ref.output.result.regulationsText}\n- Langkah perbaikan yang ditetapkan (pisahkan menjadi daftar bernomor): ${plan_ctx_ref.output.result.actionsText}\n- Status persetujuan: ${workflow.variables.remediationStatus} oleh ${workflow.variables.approvedBy}\n- Catatan persetujuan: ${workflow.variables.approvalNote}\nKembalikan hanya dokumen dalam Markdown."
+          }
+        ]
+      }
+    },
+    {
+      "name": "generate_action_plan_pdf",
+      "taskReferenceName": "plan_pdf_ref",
+      "type": "GENERATE_PDF",
+      "inputParameters": {
+        "markdown": "${draft_ref.output.result}",
+        "pageSize": "A4",
+        "theme": "default",
+        "pdfMetadata": {
+          "title": "Rencana Tindak Pelampauan Rasio - ${workflow.input.caseId}",
+          "author": "Satuan Kerja Manajemen Risiko",
+          "subject": "${workflow.input.bankName} - periode ${workflow.input.period}"
+        }
+      }
+    }
+  ],
+  "outputParameters": {
+    "caseId": "${workflow.input.caseId}",
+    "triggerSource": "${workflow.input.triggerSource}",
+    "bankName": "${workflow.input.bankName}",
+    "period": "${workflow.input.period}",
+    "remediationStatus": "${workflow.variables.remediationStatus}",
+    "handlingTier": "${workflow.variables.handlingTier}",
+    "approvedBy": "${workflow.variables.approvedBy}",
+    "approvalNote": "${workflow.variables.approvalNote}",
+    "worstSeverity": "${ratios_ref.output.worstSeverity}",
+    "complianceStatus": "${ratios_ref.output.complianceStatus}",
+    "breachCount": "${ratios_ref.output.breachCount}",
+    "breaches": "${ratios_ref.output.breaches}",
+    "breachSummary": "${ratios_ref.output.breachSummary}",
+    "mandatoryNotification": "${plan_ref.output.result.mandatoryNotification}",
+    "notificationDeadline": "${plan_ref.output.result.notificationDeadline}",
+    "actionPlanDeadline": "${plan_ref.output.result.actionPlanDeadline}",
+    "targetCureDate": "${workflow.variables.targetCureDate}",
+    "remedialActions": "${plan_ref.output.result.remedialActions}",
+    "regulations": "${plan_ref.output.result.regulations}",
+    "actionPlanMarkdown": "${draft_ref.output.result}",
+    "actionPlanPdf": "${plan_pdf_ref.output.result.location}"
+  }
+}

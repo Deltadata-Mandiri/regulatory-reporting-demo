@@ -1,0 +1,20 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+.npm/
+
+# Amplify Gen 2 — generated at deploy time
+.amplify/
+amplify_outputs.json
+amplify_outputs*
+public/amplify_outputs.json
+cdk.out/
+*.tsbuildinfo
+
+# Local
+*.log
+.DS_Store

@@ -1,0 +1,26 @@
+version: 1
+# Monorepo build spec. The Amplify app root is reporting-ui, so Amplify cd's
+# into it before running these phases. backend deploys the Lambda + Function URL
+# via ampx pipeline-deploy; frontend copies the generated amplify_outputs.json
+# into public/ so the static console can discover the API base at runtime.
+applications:
+  - appRoot: reporting-ui
+    backend:
+      phases:
+        build:
+          commands:
+            - npm install --cache .npm --prefer-offline
+            - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+    frontend:
+      phases:
+        build:
+          commands:
+            - cp amplify_outputs.json public/amplify_outputs.json
+      artifacts:
+        baseDirectory: public
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - .npm/**/*
+          - node_modules/**/*

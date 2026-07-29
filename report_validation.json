@@ -1,0 +1,110 @@
+{
+  "name": "report_validation",
+  "description": "Child workflow. Runs the regulator's edit-check rule set over a prepared report before it is transmitted: form completeness against the required schedule, reconciliation to the general ledger, balance-sheet equation, cross-reference of loan totals to the ledger, referential integrity of reporting codes (sandi), mandatory-field population, duplicate detection, period-on-period variance, resubmission count and deadline position. Returns blocking errors separately from warnings, and decides whether the report may be transmitted without human sign-off.",
+  "version": 1,
+  "schemaVersion": 2,
+  "restartable": true,
+  "ownerEmail": "",
+  "timeoutPolicy": "ALERT_ONLY",
+  "timeoutSeconds": 0,
+  "inputParameters": [
+    "validationContext",
+    "reportCode",
+    "reportName",
+    "period",
+    "asOfDate",
+    "submissionDeadline",
+    "submittedForms",
+    "requiredForms",
+    "recordCount",
+    "reportTotalAssets",
+    "glTotalAssets",
+    "reportTotalLiabilities",
+    "reportTotalEquity",
+    "reportTotalLoans",
+    "ledgerTotalLoans",
+    "priorPeriodTotalAssets",
+    "invalidCodeCount",
+    "nullMandatoryFieldCount",
+    "duplicateRecordCount",
+    "toleranceIDR",
+    "variancePctThreshold",
+    "resubmissionCount"
+  ],
+  "tasks": [
+    {
+      "name": "stringify_forms",
+      "taskReferenceName": "stringify_forms_ref",
+      "type": "JSON_JQ_TRANSFORM",
+      "inputParameters": {
+        "submittedForms": "${workflow.input.submittedForms}",
+        "requiredForms": "${workflow.input.requiredForms}",
+        "queryExpression": "{submittedForms:(.submittedForms // []),requiredForms:(.requiredForms // [])} | tojson"
+      }
+    },
+    {
+      "name": "run_edit_checks",
+      "taskReferenceName": "checks_ref",
+      "type": "INLINE",
+      "inputParameters": {
+        "evaluatorType": "graaljs",
+        "payload": "${stringify_forms_ref.output.result}",
+        "reportCode": "${workflow.input.reportCode}",
+        "asOfDate": "${workflow.input.asOfDate}",
+        "submissionDeadline": "${workflow.input.submissionDeadline}",
+        "recordCount": "${workflow.input.recordCount}",
+        "reportTotalAssets": "${workflow.input.reportTotalAssets}",
+        "glTotalAssets": "${workflow.input.glTotalAssets}",
+        "reportTotalLiabilities": "${workflow.input.reportTotalLiabilities}",
+        "reportTotalEquity": "${workflow.input.reportTotalEquity}",
+        "reportTotalLoans": "${workflow.input.reportTotalLoans}",
+        "ledgerTotalLoans": "${workflow.input.ledgerTotalLoans}",
+        "priorPeriodTotalAssets": "${workflow.input.priorPeriodTotalAssets}",
+        "invalidCodeCount": "${workflow.input.invalidCodeCount}",
+        "nullMandatoryFieldCount": "${workflow.input.nullMandatoryFieldCount}",
+        "duplicateRecordCount": "${workflow.input.duplicateRecordCount}",
+        "toleranceIDR": "${workflow.input.toleranceIDR}",
+        "variancePctThreshold": "${workflow.input.variancePctThreshold}",
+        "resubmissionCount": "${workflow.input.resubmissionCount}",
+        "expression": "(function(){var data={};try{data=JSON.parse($.payload)||{};}catch(e){data={};}var submitted=data.submittedForms||[];var required=data.requiredForms||[];var num=function(v){return Number(v)||0;};var has=function(a,v){for(var i=0;i<a.length;i++){if(String(a[i])===String(v)){return true;}}return false;};var toDays=function(s){var p=String(s||'').split('-');if(p.length!==3){return null;}var y=Number(p[0]),m=Number(p[1]),d=Number(p[2]);if(!(y>0&&m>0&&d>0)){return null;}return Date.UTC(y,m-1,d)/86400000;};var errors=[];var warnings=[];var addErr=function(code,rule,detail){errors.push({code:code,rule:rule,detail:detail,blocking:true});};var addWarn=function(code,rule,detail){warnings.push({code:code,rule:rule,detail:detail,blocking:false});};var tol=num($.toleranceIDR);if(tol<=0){tol=1000000;}var missing=[];for(var i=0;i<required.length;i++){if(!has(submitted,required[i])){missing.push(String(required[i]));}}if(missing.length>0){addErr('E01_FORM_MISSING','Kelengkapan formulir','Formulir wajib belum tersedia: '+missing.join(', '));}var records=num($.recordCount);if(records<=0){addErr('E02_NO_RECORDS','Isi laporan','Laporan tidak memuat satu pun baris data');}var reportAssets=num($.reportTotalAssets);var glAssets=num($.glTotalAssets);var glDiff=Math.abs(reportAssets-glAssets);if(glDiff>tol){addErr('E03_GL_RECON','Rekonsiliasi buku besar','Total aset laporan menyimpang '+glDiff+' dari buku besar (toleransi '+tol+')');}var liab=num($.reportTotalLiabilities);var equity=num($.reportTotalEquity);var balDiff=Math.abs(reportAssets-(liab+equity));if(balDiff>tol){addErr('E04_BALANCE','Persamaan neraca','Aset tidak sama dengan kewajiban ditambah ekuitas, selisih '+balDiff);}var reportLoans=num($.reportTotalLoans);var ledgerLoans=num($.ledgerTotalLoans);var loanDiff=Math.abs(reportLoans-ledgerLoans);if(loanDiff>tol){addErr('E05_LOAN_XREF','Konsistensi antar-form','Total kredit pada laporan menyimpang '+loanDiff+' dari mutasi ledger kredit');}var invalidCodes=num($.invalidCodeCount);if(invalidCodes>0){addErr('E06_INVALID_SANDI','Integritas sandi','Terdapat '+invalidCodes+' baris dengan sandi tidak dikenal');}var nulls=num($.nullMandatoryFieldCount);if(nulls>0){addErr('E07_NULL_MANDATORY','Field wajib','Terdapat '+nulls+' field wajib yang kosong');}var dupes=num($.duplicateRecordCount);if(dupes>0){addErr('E08_DUPLICATE','Duplikasi data','Terdapat '+dupes+' baris duplikat');}var prior=num($.priorPeriodTotalAssets);var threshold=num($.variancePctThreshold);if(threshold<=0){threshold=15;}var variancePct=0;if(prior>0){variancePct=Math.round(((reportAssets-prior)/prior)*10000)/100;if(Math.abs(variancePct)>threshold){addWarn('W01_VARIANCE','Analisis varians','Total aset bergerak '+variancePct+'% dari periode sebelumnya (ambang '+threshold+'%) - wajib disertai penjelasan');}}var asOf=toDays($.asOfDate);var due=toDays($.submissionDeadline);var daysToDeadline=null;var late=false;if(asOf!==null&&due!==null){daysToDeadline=due-asOf;if(daysToDeadline<0){late=true;addWarn('W02_LATE','Batas waktu penyampaian','Laporan terlambat '+Math.abs(daysToDeadline)+' hari dari batas waktu - berpotensi sanksi administratif');}else if(daysToDeadline<=1){addWarn('W03_DEADLINE_NEAR','Batas waktu penyampaian','Sisa waktu penyampaian '+daysToDeadline+' hari');}}var resub=num($.resubmissionCount);if(resub>=2){addWarn('W04_RESUBMISSION','Riwayat koreksi','Laporan periode ini telah dikoreksi '+resub+' kali - perlu penelaahan penyebab berulang');}var errorCount=errors.length;var warningCount=warnings.length;var score=100-(errorCount*20)-(warningCount*5);if(score<0){score=0;}var validationStatus;if(errorCount>0){validationStatus='FAIL';}else if(warningCount>0){validationStatus='PASS_WITH_WARNINGS';}else{validationStatus='PASS';}var canAutoSubmit=(errorCount===0&&warningCount===0);var errorCodes=[];for(var i=0;i<errors.length;i++){errorCodes.push(errors[i].code);}var warningCodes=[];for(var i=0;i<warnings.length;i++){warningCodes.push(warnings[i].code);}return {valid:(errorCount===0),validationStatus:validationStatus,canAutoSubmit:canAutoSubmit,blockingErrors:errors,warnings:warnings,errorCodes:errorCodes,warningCodes:warningCodes,errorCount:errorCount,warningCount:warningCount,validationScore:score,missingForms:missing,formsSubmitted:submitted.length,formsRequired:required.length,recordCount:records,glVarianceIDR:glDiff,balanceVarianceIDR:balDiff,loanVarianceIDR:loanDiff,periodVariancePct:variancePct,daysToDeadline:daysToDeadline,lateSubmission:late};})();"
+      }
+    },
+    {
+      "name": "summarize_findings",
+      "taskReferenceName": "findings_ref",
+      "type": "JSON_JQ_TRANSFORM",
+      "inputParameters": {
+        "blockingErrors": "${checks_ref.output.result.blockingErrors}",
+        "warnings": "${checks_ref.output.result.warnings}",
+        "missingForms": "${checks_ref.output.result.missingForms}",
+        "queryExpression": "{errorsText:(if ((.blockingErrors // [])|length)>0 then ((.blockingErrors // [])|map(.code+\" (\"+.rule+\"): \"+.detail)|join(\"; \")) else \"Tidak ada\" end),warningsText:(if ((.warnings // [])|length)>0 then ((.warnings // [])|map(.code+\" (\"+.rule+\"): \"+.detail)|join(\"; \")) else \"Tidak ada\" end),missingFormsText:(if ((.missingForms // [])|length)>0 then ((.missingForms // [])|join(\", \")) else \"Tidak ada\" end)}"
+      }
+    }
+  ],
+  "outputParameters": {
+    "reportCode": "${workflow.input.reportCode}",
+    "period": "${workflow.input.period}",
+    "validationContext": "${workflow.input.validationContext}",
+    "valid": "${checks_ref.output.result.valid}",
+    "validationStatus": "${checks_ref.output.result.validationStatus}",
+    "canAutoSubmit": "${checks_ref.output.result.canAutoSubmit}",
+    "validationScore": "${checks_ref.output.result.validationScore}",
+    "blockingErrors": "${checks_ref.output.result.blockingErrors}",
+    "warnings": "${checks_ref.output.result.warnings}",
+    "errorCodes": "${checks_ref.output.result.errorCodes}",
+    "warningCodes": "${checks_ref.output.result.warningCodes}",
+    "errorCount": "${checks_ref.output.result.errorCount}",
+    "warningCount": "${checks_ref.output.result.warningCount}",
+    "missingForms": "${checks_ref.output.result.missingForms}",
+    "recordCount": "${checks_ref.output.result.recordCount}",
+    "glVarianceIDR": "${checks_ref.output.result.glVarianceIDR}",
+    "balanceVarianceIDR": "${checks_ref.output.result.balanceVarianceIDR}",
+    "loanVarianceIDR": "${checks_ref.output.result.loanVarianceIDR}",
+    "periodVariancePct": "${checks_ref.output.result.periodVariancePct}",
+    "daysToDeadline": "${checks_ref.output.result.daysToDeadline}",
+    "lateSubmission": "${checks_ref.output.result.lateSubmission}",
+    "errorsText": "${findings_ref.output.result.errorsText}",
+    "warningsText": "${findings_ref.output.result.warningsText}",
+    "missingFormsText": "${findings_ref.output.result.missingFormsText}"
+  }
+}

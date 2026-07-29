@@ -1,0 +1,53 @@
+{
+  "_comment": "The ONLY workflows and gates the proxy will start or signal — the allowlist. Read by BOTH runtimes: server.js (local `node server.js`) and amplify/functions/api/flows.ts (the deployed Lambda). Single-sourced deliberately: an allowlist that drifts between local and deployed is a security bug, not a cosmetic one. Each flow's workflow name and version can be overridden per environment by WF_<KEY> and WF_<KEY>_VERSION, e.g. WF_SUBMISSION / WF_SUBMISSION_VERSION.",
+
+  "submission": {
+    "workflow": "regulatory_report_submission",
+    "version": "1",
+    "label": "Penyampaian Laporan",
+    "samples": [
+      ["sample_clean.json", "Bersih — auto"],
+      ["sample_review.json", "Peringatan — checker"],
+      ["sample_breach.json", "Pelampauan modal & likuiditas"],
+      ["sample_bmpk_breach.json", "Pelampauan BMPK"],
+      ["sample_rejected.json", "Gagal edit-check"]
+    ],
+    "gates": {
+      "checker_ref": {
+        "label": "Persetujuan Checker",
+        "enums": { "decision": ["APPROVE", "REJECT"] },
+        "strings": ["note", "reviewedBy"],
+        "defaults": { "reviewedBy": "Kepala Satuan Kerja Kepatuhan" }
+      },
+      "breach_checker_ref": {
+        "label": "Persetujuan Pengungkapan Pelampauan",
+        "enums": { "decision": ["APPROVE", "REJECT"] },
+        "strings": ["note", "reviewedBy"],
+        "defaults": { "reviewedBy": "Direktur Kepatuhan" }
+      }
+    }
+  },
+
+  "remediation": {
+    "workflow": "breach_remediation",
+    "version": "1",
+    "label": "Remediasi Pelampauan",
+    "samples": [
+      ["sample_breach_case.json", "Kasus pelampauan"]
+    ],
+    "gates": {
+      "board_ref": {
+        "label": "Persetujuan Direksi",
+        "enums": {},
+        "strings": ["note", "approvedBy"],
+        "defaults": { "approvedBy": "Direktur Utama" }
+      },
+      "committee_ref": {
+        "label": "Persetujuan Komite Manajemen Risiko",
+        "enums": {},
+        "strings": ["note", "approvedBy"],
+        "defaults": { "approvedBy": "Ketua Komite Manajemen Risiko" }
+      }
+    }
+  }
+}

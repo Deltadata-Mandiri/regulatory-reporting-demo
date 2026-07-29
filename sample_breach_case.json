@@ -1,0 +1,52 @@
+{
+  "caseId": "BR-2026-06-001",
+  "triggerSource": "STANDALONE_REVIEW",
+  "bankName": "PT Bank Delta Nusantara Tbk",
+  "bankCode": "096",
+  "period": "2026-06",
+  "asOfDate": "2026-07-10",
+  "riskProfile": 2,
+  "kbmi": 3,
+  "countercyclicalBufferPct": 0,
+  "dsibBucket": 2,
+  "cet1Capital": 15000000000000,
+  "at1Capital": 1000000000000,
+  "tier2Capital": 3000000000000,
+  "rwaCredit": 220000000000000,
+  "rwaMarket": 8000000000000,
+  "rwaOperational": 22000000000000,
+  "totalLoans": 210000000000000,
+  "kol3Balance": 5000000000000,
+  "kol4Balance": 3000000000000,
+  "kol5Balance": 5000000000000,
+  "lossAllowance": 2000000000000,
+  "thirdPartyFunds": 240000000000000,
+  "securitiesIssued": 6000000000000,
+  "corporateBondsHeld": 4000000000000,
+  "hqla": 36000000000000,
+  "netCashOutflow30d": 42000000000000,
+  "availableStableFunding": 250000000000000,
+  "requiredStableFunding": 205000000000000,
+  "gwmRupiahPct": 9.4,
+  "gwmRequiredPct": 9,
+  "largeExposures": [
+    {
+      "borrower": "PT Nusantara Energi Prima",
+      "group": "Nusantara Group",
+      "exposureIDR": 2500000000000,
+      "related": false
+    },
+    {
+      "borrower": "PT Sawit Lestari Makmur",
+      "group": "",
+      "exposureIDR": 1800000000000,
+      "related": false
+    },
+    {
+      "borrower": "PT Delta Multifinance",
+      "group": "",
+      "exposureIDR": 1200000000000,
+      "related": true
+    }
+  ]
+}

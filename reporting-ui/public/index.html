@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BDN · Konsol Pelaporan Regulator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">BDN</span>
+      <div class="brand-text">
+        <strong>Konsol Pelaporan Regulator</strong>
+        <small>Penyampaian Laporan · Remediasi Pelampauan — Orkes Conductor</small>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="demo-badge">PROTOTYPE / DEMO</span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="submission">Penyampaian Laporan</button>
+    <button class="tab" data-tab="remediation">Remediasi Pelampauan</button>
+    <button class="tab" data-tab="queue">Antrean Persetujuan <span class="tab-count zero" id="queueCount">0</span></button>
+  </nav>
+
+  <main class="layout">
+
+    <!-- ===================== PENYAMPAIAN LAPORAN ===================== -->
+    <section class="panel active" data-panel="submission">
+      <div class="grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Sampaikan Laporan Berkala</h2>
+            <span class="wf-tag" data-wf="submission">regulatory_report_submission</span>
+          </div>
+          <p class="muted">
+            Edit-check dan perhitungan rasio prudensial berjalan <strong>paralel</strong>, lalu digabungkan
+            menjadi satu jalur. Hanya kegagalan edit-check yang menahan laporan — pelampauan rasio tetap
+            disampaikan, disertai pengungkapan.
+          </p>
+          <div class="preset-row" data-presets="submission"></div>
+          <div class="form" data-form="submission"></div>
+          <div class="form-actions">
+            <button class="btn primary" data-run="submission">Jalankan</button>
+            <button class="btn ghost" data-raw="submission">Lihat JSON</button>
+          </div>
+          <pre class="raw hidden" data-rawview="submission"></pre>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Jejak Eksekusi</h2><span class="wfid" data-wfid="submission"></span></div>
+          <div class="trace" data-trace="submission"><p class="muted">Belum ada eksekusi.</p></div>
+          <div class="result" data-result="submission"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== REMEDIASI ===================== -->
+    <section class="panel" data-panel="remediation">
+      <div class="grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Kasus Pelampauan Rasio</h2>
+            <span class="wf-tag" data-wf="remediation">breach_remediation</span>
+          </div>
+          <p class="muted">
+            Dijalankan tersendiri, atau otomatis sebagai anak dari penyampaian laporan. Rasio
+            <strong>dihitung ulang</strong> dari angka sumber, bukan diambil dari pemanggil — sebuah kasus
+            bisa diangkat beberapa hari kemudian atas data yang sudah dikoreksi.
+          </p>
+          <div class="preset-row" data-presets="remediation"></div>
+          <div class="form" data-form="remediation"></div>
+          <div class="form-actions">
+            <button class="btn primary" data-run="remediation">Jalankan</button>
+            <button class="btn ghost" data-raw="remediation">Lihat JSON</button>
+          </div>
+          <pre class="raw hidden" data-rawview="remediation"></pre>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Jejak Eksekusi</h2><span class="wfid" data-wfid="remediation"></span></div>
+          <div class="trace" data-trace="remediation"><p class="muted">Belum ada eksekusi.</p></div>
+          <div class="result" data-result="remediation"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== ANTREAN ===================== -->
+    <section class="panel" data-panel="queue">
+      <div class="card">
+        <div class="card-head">
+          <h2>Antrean Persetujuan</h2>
+          <button class="btn ghost small" id="queueRefresh">Muat Ulang</button>
+        </div>
+        <p class="muted">
+          Semua eksekusi yang sedang menunggu keputusan manusia, lintas alur. Remediasi yang dijalankan
+          sebagai anak dari penyampaian laporan tetap muncul di sini — gerbang Direksi adalah pekerjaan
+          nyata, siapa pun yang memulainya.
+        </p>
+        <div id="queueList"><p class="muted">Belum dimuat.</p></div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span>PT Bank Delta Nusantara dan seluruh angka pada demo ini <strong>fiktif</strong>. Konsol ini prototipe
+    tanpa autentikasi — <code>reviewedBy</code> dan <code>approvedBy</code> masih teks bebas dan harus diikat ke
+    identitas SSO, dengan pemisahan maker–checker yang ditegakkan, sebelum dipakai sungguhan.</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

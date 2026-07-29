@@ -1,0 +1,519 @@
+{
+  "name": "regulatory_report_submission",
+  "description": "Orchestrator. End-to-end submission of a periodic prudential report to the Indonesian regulator. Validates the request, then runs the regulator edit-check suite and the prudential ratio calculation in parallel, combines both verdicts into one route (auto-submit / maker-checker review / breach remediation / return to preparer), pauses on a WAIT for the checker's sign-off where the route demands it, escalates a limit breach into the breach_remediation child, then has an LLM draft the transmittal memo, renders it to PDF, transmits to the reporting channel and records the receipt.",
+  "version": 1,
+  "schemaVersion": 2,
+  "restartable": true,
+  "ownerEmail": "",
+  "timeoutPolicy": "ALERT_ONLY",
+  "timeoutSeconds": 0,
+  "inputParameters": [
+    "reportId",
+    "reportCode",
+    "reportName",
+    "bankName",
+    "bankCode",
+    "period",
+    "asOfDate",
+    "submissionDeadline",
+    "preparedBy",
+    "submittedForms",
+    "requiredForms",
+    "recordCount",
+    "reportTotalAssets",
+    "glTotalAssets",
+    "reportTotalLiabilities",
+    "reportTotalEquity",
+    "reportTotalLoans",
+    "ledgerTotalLoans",
+    "priorPeriodTotalAssets",
+    "invalidCodeCount",
+    "nullMandatoryFieldCount",
+    "duplicateRecordCount",
+    "toleranceIDR",
+    "variancePctThreshold",
+    "resubmissionCount",
+    "riskProfile",
+    "kbmi",
+    "countercyclicalBufferPct",
+    "dsibBucket",
+    "cet1Capital",
+    "at1Capital",
+    "tier2Capital",
+    "rwaCredit",
+    "rwaMarket",
+    "rwaOperational",
+    "totalLoans",
+    "kol3Balance",
+    "kol4Balance",
+    "kol5Balance",
+    "lossAllowance",
+    "thirdPartyFunds",
+    "securitiesIssued",
+    "corporateBondsHeld",
+    "hqla",
+    "netCashOutflow30d",
+    "availableStableFunding",
+    "requiredStableFunding",
+    "gwmRupiahPct",
+    "gwmRequiredPct",
+    "largeExposures"
+  ],
+  "variables": {
+    "submissionStatus": "PENDING",
+    "routeTaken": "None",
+    "reviewDecision": "",
+    "reviewNote": "",
+    "reviewedBy": "",
+    "remediationStatus": "NOT_REQUIRED"
+  },
+  "tasks": [
+    {
+      "name": "validate_request",
+      "taskReferenceName": "validate_ref",
+      "type": "INLINE",
+      "inputParameters": {
+        "evaluatorType": "graaljs",
+        "reportId": "${workflow.input.reportId}",
+        "reportCode": "${workflow.input.reportCode}",
+        "period": "${workflow.input.period}",
+        "asOfDate": "${workflow.input.asOfDate}",
+        "submissionDeadline": "${workflow.input.submissionDeadline}",
+        "bankCode": "${workflow.input.bankCode}",
+        "expression": "(function(){var e=[];var req=function(v,n){if(v===null||v===undefined||String(v).length===0){e.push(n+' is required');}};req($.reportId,'reportId');req($.reportCode,'reportCode');req($.bankCode,'bankCode');var p=String($.period||'');if(!/^[0-9]{4}-[0-9]{2}$/.test(p)){e.push('period must be YYYY-MM');}var dt=function(v,n){if(!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(String(v||''))){e.push(n+' must be YYYY-MM-DD');}};dt($.asOfDate,'asOfDate');dt($.submissionDeadline,'submissionDeadline');return {valid:e.length===0,errors:e};})();"
+      }
+    },
+    {
+      "name": "validation_gate",
+      "taskReferenceName": "validation_gate_ref",
+      "type": "SWITCH",
+      "evaluatorType": "graaljs",
+      "expression": "$.valid ? 'VALID' : 'INVALID'",
+      "inputParameters": {
+        "valid": "${validate_ref.output.result.valid}"
+      },
+      "decisionCases": {
+        "INVALID": [
+          {
+            "name": "terminate_invalid",
+            "taskReferenceName": "terminate_invalid_ref",
+            "type": "TERMINATE",
+            "inputParameters": {
+              "terminationStatus": "FAILED",
+              "terminationReason": "Submission request failed validation",
+              "workflowOutput": {
+                "submissionStatus": "REQUEST_INVALID",
+                "errors": "${validate_ref.output.result.errors}"
+              }
+            }
+          }
+        ]
+      },
+      "defaultCase": []
+    },
+    {
+      "name": "analysis_fork",
+      "taskReferenceName": "analysis_fork_ref",
+      "type": "FORK_JOIN",
+      "inputParameters": {},
+      "forkTasks": [
+        [
+          {
+            "name": "validate_report_content",
+            "taskReferenceName": "content_ref",
+            "type": "SUB_WORKFLOW",
+            "subWorkflowParam": {
+              "name": "report_validation",
+              "version": 1
+            },
+            "inputParameters": {
+              "validationContext": "PERIODIC_SUBMISSION",
+              "reportCode": "${workflow.input.reportCode}",
+              "reportName": "${workflow.input.reportName}",
+              "period": "${workflow.input.period}",
+              "asOfDate": "${workflow.input.asOfDate}",
+              "submissionDeadline": "${workflow.input.submissionDeadline}",
+              "submittedForms": "${workflow.input.submittedForms}",
+              "requiredForms": "${workflow.input.requiredForms}",
+              "recordCount": "${workflow.input.recordCount}",
+              "reportTotalAssets": "${workflow.input.reportTotalAssets}",
+              "glTotalAssets": "${workflow.input.glTotalAssets}",
+              "reportTotalLiabilities": "${workflow.input.reportTotalLiabilities}",
+              "reportTotalEquity": "${workflow.input.reportTotalEquity}",
+              "reportTotalLoans": "${workflow.input.reportTotalLoans}",
+              "ledgerTotalLoans": "${workflow.input.ledgerTotalLoans}",
+              "priorPeriodTotalAssets": "${workflow.input.priorPeriodTotalAssets}",
+              "invalidCodeCount": "${workflow.input.invalidCodeCount}",
+              "nullMandatoryFieldCount": "${workflow.input.nullMandatoryFieldCount}",
+              "duplicateRecordCount": "${workflow.input.duplicateRecordCount}",
+              "toleranceIDR": "${workflow.input.toleranceIDR}",
+              "variancePctThreshold": "${workflow.input.variancePctThreshold}",
+              "resubmissionCount": "${workflow.input.resubmissionCount}"
+            }
+          }
+        ],
+        [
+          {
+            "name": "calculate_prudential_ratios",
+            "taskReferenceName": "ratios_ref",
+            "type": "SUB_WORKFLOW",
+            "subWorkflowParam": {
+              "name": "prudential_ratios",
+              "version": 1
+            },
+            "inputParameters": {
+              "calculationContext": "PERIODIC_SUBMISSION",
+              "bankName": "${workflow.input.bankName}",
+              "period": "${workflow.input.period}",
+              "asOfDate": "${workflow.input.asOfDate}",
+              "riskProfile": "${workflow.input.riskProfile}",
+              "kbmi": "${workflow.input.kbmi}",
+              "countercyclicalBufferPct": "${workflow.input.countercyclicalBufferPct}",
+              "dsibBucket": "${workflow.input.dsibBucket}",
+              "cet1Capital": "${workflow.input.cet1Capital}",
+              "at1Capital": "${workflow.input.at1Capital}",
+              "tier2Capital": "${workflow.input.tier2Capital}",
+              "rwaCredit": "${workflow.input.rwaCredit}",
+              "rwaMarket": "${workflow.input.rwaMarket}",
+              "rwaOperational": "${workflow.input.rwaOperational}",
+              "totalLoans": "${workflow.input.totalLoans}",
+              "kol3Balance": "${workflow.input.kol3Balance}",
+              "kol4Balance": "${workflow.input.kol4Balance}",
+              "kol5Balance": "${workflow.input.kol5Balance}",
+              "lossAllowance": "${workflow.input.lossAllowance}",
+              "thirdPartyFunds": "${workflow.input.thirdPartyFunds}",
+              "securitiesIssued": "${workflow.input.securitiesIssued}",
+              "corporateBondsHeld": "${workflow.input.corporateBondsHeld}",
+              "hqla": "${workflow.input.hqla}",
+              "netCashOutflow30d": "${workflow.input.netCashOutflow30d}",
+              "availableStableFunding": "${workflow.input.availableStableFunding}",
+              "requiredStableFunding": "${workflow.input.requiredStableFunding}",
+              "gwmRupiahPct": "${workflow.input.gwmRupiahPct}",
+              "gwmRequiredPct": "${workflow.input.gwmRequiredPct}",
+              "largeExposures": "${workflow.input.largeExposures}"
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "analysis_join",
+      "taskReferenceName": "analysis_join_ref",
+      "type": "JOIN",
+      "joinOn": [
+        "content_ref",
+        "ratios_ref"
+      ]
+    },
+    {
+      "name": "determine_route",
+      "taskReferenceName": "route_ref",
+      "type": "INLINE",
+      "inputParameters": {
+        "evaluatorType": "graaljs",
+        "valid": "${content_ref.output.valid}",
+        "validationStatus": "${content_ref.output.validationStatus}",
+        "canAutoSubmit": "${content_ref.output.canAutoSubmit}",
+        "lateSubmission": "${content_ref.output.lateSubmission}",
+        "errorCount": "${content_ref.output.errorCount}",
+        "warningCount": "${content_ref.output.warningCount}",
+        "daysToDeadline": "${content_ref.output.daysToDeadline}",
+        "complianceStatus": "${ratios_ref.output.complianceStatus}",
+        "mandatoryNotification": "${ratios_ref.output.mandatoryNotification}",
+        "worstSeverity": "${ratios_ref.output.worstSeverity}",
+        "breachCount": "${ratios_ref.output.breachCount}",
+        "expression": "(function(){var truthy=function(v){return v===true||String(v)==='true';};var valid=truthy($.valid);var canAuto=truthy($.canAutoSubmit);var late=truthy($.lateSubmission);var mandatory=truthy($.mandatoryNotification);var compliance=String($.complianceStatus||'');var errors=Number($.errorCount)||0;var warnings=Number($.warningCount)||0;var breaches=Number($.breachCount)||0;var reasons=[];var route;if(!valid){route='REJECTED';reasons.push('Laporan gagal '+errors+' edit-check yang bersifat blocking - dikembalikan kepada penyusun');}else if(mandatory||compliance==='BREACH_CRITICAL'||compliance==='BREACH'){route='BREACH';reasons.push('Terdapat '+breaches+' pelampauan rasio prudensial ('+compliance+') - wajib rencana tindak dan pelaporan ke otoritas');}else if(!canAuto||late||compliance==='NON_COMPLIANT_MINOR'||compliance==='WATCH'){route='REVIEW';if(warnings>0){reasons.push(warnings+' peringatan edit-check memerlukan penjelasan');}if(late){reasons.push('Penyampaian melewati batas waktu');}if(compliance==='NON_COMPLIANT_MINOR'){reasons.push('Rasio di luar ketentuan namun tidak wajib notifikasi segera');}if(compliance==='WATCH'){reasons.push('Terdapat rasio yang mendekati ambang batas');}}else{route='AUTO';reasons.push('Seluruh edit-check bersih dan seluruh rasio prudensial dalam ketentuan');}var requiresChecker=(route==='REVIEW'||route==='BREACH');return {route:route,requiresChecker:requiresChecker,routeReasons:reasons,routeReason:reasons.join('; '),errorCount:errors,warningCount:warnings,breachCount:breaches};})();"
+      }
+    },
+    {
+      "name": "submission_router",
+      "taskReferenceName": "submission_router_ref",
+      "type": "SWITCH",
+      "evaluatorType": "value-param",
+      "expression": "route",
+      "inputParameters": {
+        "route": "${route_ref.output.result.route}"
+      },
+      "decisionCases": {
+        "AUTO": [
+          {
+            "name": "set_auto_submitted",
+            "taskReferenceName": "set_auto_ref",
+            "type": "SET_VARIABLE",
+            "inputParameters": {
+              "submissionStatus": "APPROVED_FOR_TRANSMISSION",
+              "routeTaken": "AUTO",
+              "reviewDecision": "AUTO_APPROVED",
+              "reviewedBy": "Sistem (STP)",
+              "reviewNote": "Disetujui otomatis - tanpa temuan edit-check maupun pelampauan rasio"
+            }
+          }
+        ],
+        "REVIEW": [
+          {
+            "name": "checker_review",
+            "taskReferenceName": "checker_ref",
+            "type": "WAIT",
+            "inputParameters": {
+              "reportId": "${workflow.input.reportId}",
+              "reportCode": "${workflow.input.reportCode}",
+              "period": "${workflow.input.period}",
+              "preparedBy": "${workflow.input.preparedBy}",
+              "routeReason": "${route_ref.output.result.routeReason}",
+              "validationStatus": "${content_ref.output.validationStatus}",
+              "warningsText": "${content_ref.output.warningsText}",
+              "complianceStatus": "${ratios_ref.output.complianceStatus}",
+              "watchSummary": "${ratios_ref.output.watchSummary}",
+              "daysToDeadline": "${content_ref.output.daysToDeadline}"
+            }
+          },
+          {
+            "name": "resolve_review",
+            "taskReferenceName": "resolve_review_ref",
+            "type": "INLINE",
+            "inputParameters": {
+              "evaluatorType": "graaljs",
+              "decision": "${checker_ref.output.decision}",
+              "note": "${checker_ref.output.note}",
+              "reviewedBy": "${checker_ref.output.reviewedBy}",
+              "expression": "(function(){var d=String($.decision||'').toUpperCase();var status;if(d==='APPROVE'){status='APPROVED_FOR_TRANSMISSION';}else if(d==='REJECT'){status='RETURNED_TO_PREPARER';}else{status='APPROVED_WITH_EXPLANATION';}return {submissionStatus:status,reviewDecision:(d||'APPROVE_WITH_EXPLANATION'),reviewNote:String($.note||''),reviewedBy:String($.reviewedBy||'Checker')};})();"
+            }
+          },
+          {
+            "name": "set_reviewed",
+            "taskReferenceName": "set_reviewed_ref",
+            "type": "SET_VARIABLE",
+            "inputParameters": {
+              "submissionStatus": "${resolve_review_ref.output.result.submissionStatus}",
+              "routeTaken": "REVIEW",
+              "reviewDecision": "${resolve_review_ref.output.result.reviewDecision}",
+              "reviewNote": "${resolve_review_ref.output.result.reviewNote}",
+              "reviewedBy": "${resolve_review_ref.output.result.reviewedBy}"
+            }
+          }
+        ],
+        "BREACH": [
+          {
+            "name": "escalate_breach",
+            "taskReferenceName": "remediation_ref",
+            "type": "SUB_WORKFLOW",
+            "subWorkflowParam": {
+              "name": "breach_remediation",
+              "version": 1
+            },
+            "inputParameters": {
+              "caseId": "BR-${workflow.input.reportId}",
+              "triggerSource": "PERIODIC_SUBMISSION",
+              "bankName": "${workflow.input.bankName}",
+              "bankCode": "${workflow.input.bankCode}",
+              "period": "${workflow.input.period}",
+              "asOfDate": "${workflow.input.asOfDate}",
+              "riskProfile": "${workflow.input.riskProfile}",
+              "kbmi": "${workflow.input.kbmi}",
+              "countercyclicalBufferPct": "${workflow.input.countercyclicalBufferPct}",
+              "dsibBucket": "${workflow.input.dsibBucket}",
+              "cet1Capital": "${workflow.input.cet1Capital}",
+              "at1Capital": "${workflow.input.at1Capital}",
+              "tier2Capital": "${workflow.input.tier2Capital}",
+              "rwaCredit": "${workflow.input.rwaCredit}",
+              "rwaMarket": "${workflow.input.rwaMarket}",
+              "rwaOperational": "${workflow.input.rwaOperational}",
+              "totalLoans": "${workflow.input.totalLoans}",
+              "kol3Balance": "${workflow.input.kol3Balance}",
+              "kol4Balance": "${workflow.input.kol4Balance}",
+              "kol5Balance": "${workflow.input.kol5Balance}",
+              "lossAllowance": "${workflow.input.lossAllowance}",
+              "thirdPartyFunds": "${workflow.input.thirdPartyFunds}",
+              "securitiesIssued": "${workflow.input.securitiesIssued}",
+              "corporateBondsHeld": "${workflow.input.corporateBondsHeld}",
+              "hqla": "${workflow.input.hqla}",
+              "netCashOutflow30d": "${workflow.input.netCashOutflow30d}",
+              "availableStableFunding": "${workflow.input.availableStableFunding}",
+              "requiredStableFunding": "${workflow.input.requiredStableFunding}",
+              "gwmRupiahPct": "${workflow.input.gwmRupiahPct}",
+              "gwmRequiredPct": "${workflow.input.gwmRequiredPct}",
+              "largeExposures": "${workflow.input.largeExposures}"
+            }
+          },
+          {
+            "name": "breach_checker_review",
+            "taskReferenceName": "breach_checker_ref",
+            "type": "WAIT",
+            "inputParameters": {
+              "reportId": "${workflow.input.reportId}",
+              "reportCode": "${workflow.input.reportCode}",
+              "period": "${workflow.input.period}",
+              "routeReason": "${route_ref.output.result.routeReason}",
+              "breachSummary": "${ratios_ref.output.breachSummary}",
+              "remediationStatus": "${remediation_ref.output.remediationStatus}",
+              "actionPlanRef": "${remediation_ref.output.actionPlanPdf}",
+              "note": "Laporan hanya dapat disampaikan setelah rencana tindak atas pelampauan disetujui"
+            }
+          },
+          {
+            "name": "resolve_breach_review",
+            "taskReferenceName": "resolve_breach_ref",
+            "type": "INLINE",
+            "inputParameters": {
+              "evaluatorType": "graaljs",
+              "decision": "${breach_checker_ref.output.decision}",
+              "note": "${breach_checker_ref.output.note}",
+              "reviewedBy": "${breach_checker_ref.output.reviewedBy}",
+              "expression": "(function(){var d=String($.decision||'').toUpperCase();var status=(d==='REJECT')?'RETURNED_TO_PREPARER':'APPROVED_WITH_BREACH_DISCLOSURE';return {submissionStatus:status,reviewDecision:(d||'APPROVE'),reviewNote:String($.note||''),reviewedBy:String($.reviewedBy||'Direktur Kepatuhan')};})();"
+            }
+          },
+          {
+            "name": "set_breach_reviewed",
+            "taskReferenceName": "set_breach_ref",
+            "type": "SET_VARIABLE",
+            "inputParameters": {
+              "submissionStatus": "${resolve_breach_ref.output.result.submissionStatus}",
+              "routeTaken": "BREACH",
+              "reviewDecision": "${resolve_breach_ref.output.result.reviewDecision}",
+              "reviewNote": "${resolve_breach_ref.output.result.reviewNote}",
+              "reviewedBy": "${resolve_breach_ref.output.result.reviewedBy}",
+              "remediationStatus": "${remediation_ref.output.remediationStatus}"
+            }
+          }
+        ],
+        "REJECTED": [
+          {
+            "name": "set_rejected",
+            "taskReferenceName": "set_rejected_ref",
+            "type": "SET_VARIABLE",
+            "inputParameters": {
+              "submissionStatus": "RETURNED_TO_PREPARER",
+              "routeTaken": "REJECTED",
+              "reviewDecision": "AUTO_REJECTED",
+              "reviewedBy": "Sistem (edit-check)",
+              "reviewNote": "Laporan tidak memenuhi edit-check wajib dan tidak dapat disampaikan"
+            }
+          }
+        ]
+      },
+      "defaultCase": []
+    },
+    {
+      "name": "stringify_context",
+      "taskReferenceName": "context_ref",
+      "type": "JSON_JQ_TRANSFORM",
+      "inputParameters": {
+        "routeReasons": "${route_ref.output.result.routeReasons}",
+        "missingForms": "${content_ref.output.missingForms}",
+        "queryExpression": "{routeReasonsText:(if ((.routeReasons // [])|length)>0 then ((.routeReasons // [])|join(\"; \")) else \"Tidak ada\" end),missingFormsText:(if ((.missingForms // [])|length)>0 then ((.missingForms // [])|join(\", \")) else \"Tidak ada\" end)}"
+      }
+    },
+    {
+      "name": "generate_transmittal_memo",
+      "taskReferenceName": "memo_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "inputParameters": {
+        "llmProvider": "openai",
+        "model": "gpt-4o-mini",
+        "temperature": 0.2,
+        "maxTokens": 900,
+        "jsonOutput": false,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are a regulatory reporting officer (Satuan Kerja Kepatuhan) at an Indonesian commercial bank. Write a formal internal transmittal memo (nota dinas) in Indonesian, in Markdown, covering a periodic prudential report. Use ONLY the figures and findings supplied; never invent a ratio, an amount, a regulation, a finding or a date. State the reported prudential ratios against their regulatory limits, summarise the edit-check findings, and state the disposition. CRITICAL: never state or imply that the regulator has accepted, approved, received or validated the report - acceptance is the regulator's act, and the workflow has at most transmitted it. If the disposition is RETURNED_TO_PREPARER, make clear the report was NOT transmitted and list what must be corrected. If a limit was breached, state the breach plainly and note that a remediation action plan is required; do not minimise it. Be concise (under 380 words), factual and neutral. Begin directly with a heading and end with the signature block of the Satuan Kerja Kepatuhan. Do NOT include letterhead, postal addresses, a date line, or ANY bracketed placeholder such as [Tanggal] or [Nama]. Output raw Markdown only - no code fences, no commentary before or after."
+          },
+          {
+            "role": "user",
+            "message": "Susun nota dinas penyampaian laporan berkala. Seluruh nilai uang dalam Rupiah - tulis dengan pemisah ribuan titik, contoh Rp 1.000.000.000.\n- Bank: ${workflow.input.bankName} (sandi ${workflow.input.bankCode})\n- Laporan: ${workflow.input.reportName} (kode ${workflow.input.reportCode})\n- Periode data: ${workflow.input.period}, posisi ${workflow.input.asOfDate}\n- Batas waktu penyampaian: ${workflow.input.submissionDeadline}\n- Sisa hari terhadap batas waktu: ${content_ref.output.daysToDeadline}\n- Disusun oleh: ${workflow.input.preparedBy}\n- Jalur penanganan: ${workflow.variables.routeTaken}\n- Alasan jalur: ${context_ref.output.result.routeReasonsText}\n- Disposisi akhir: ${workflow.variables.submissionStatus}\n- Keputusan reviewer: ${workflow.variables.reviewDecision} oleh ${workflow.variables.reviewedBy}\n- Catatan reviewer: ${workflow.variables.reviewNote}\n- Status edit-check: ${content_ref.output.validationStatus} (skor ${content_ref.output.validationScore}, ${content_ref.output.errorCount} error, ${content_ref.output.warningCount} peringatan)\n- Kesalahan blocking: ${content_ref.output.errorsText}\n- Peringatan: ${content_ref.output.warningsText}\n- Formulir belum lengkap: ${context_ref.output.result.missingFormsText}\n- Jumlah baris data: ${content_ref.output.recordCount}\n- Deviasi total aset terhadap periode lalu: ${content_ref.output.periodVariancePct}%\n- KPMM/CAR: ${ratios_ref.output.car}% (minimum profil risiko ${ratios_ref.output.minCarByProfile}%, termasuk buffer ${ratios_ref.output.requiredCar}%)\n- CET1: ${ratios_ref.output.cet1Ratio}%, Modal Inti: ${ratios_ref.output.tier1Ratio}%\n- NPL gross: ${ratios_ref.output.nplGross}%, NPL net: ${ratios_ref.output.nplNet}%\n- RIM: ${ratios_ref.output.rim}%, LCR: ${ratios_ref.output.lcr}%, NSFR: ${ratios_ref.output.nsfr}%\n- BMPK pihak terkait: ${ratios_ref.output.relatedPartyPct}% dari modal, eksposur terbesar ${ratios_ref.output.largestExposurePct}% dari modal\n- Status kepatuhan rasio: ${ratios_ref.output.complianceStatus}\n- Pelampauan: ${ratios_ref.output.breachSummary}\n- Rasio mendekati ambang: ${ratios_ref.output.watchSummary}\nKembalikan hanya nota dinas dalam Markdown."
+          }
+        ]
+      }
+    },
+    {
+      "name": "generate_memo_pdf",
+      "taskReferenceName": "memo_pdf_ref",
+      "type": "GENERATE_PDF",
+      "inputParameters": {
+        "markdown": "${memo_ref.output.result}",
+        "pageSize": "A4",
+        "theme": "default",
+        "pdfMetadata": {
+          "title": "Nota Dinas Penyampaian ${workflow.input.reportCode} - ${workflow.input.period}",
+          "author": "Satuan Kerja Kepatuhan",
+          "subject": "${workflow.input.reportName} - ${workflow.input.bankName}"
+        }
+      }
+    },
+    {
+      "name": "transmit_report",
+      "taskReferenceName": "transmit_ref",
+      "type": "INLINE",
+      "inputParameters": {
+        "evaluatorType": "graaljs",
+        "submissionStatus": "${workflow.variables.submissionStatus}",
+        "reportId": "${workflow.input.reportId}",
+        "reportCode": "${workflow.input.reportCode}",
+        "bankCode": "${workflow.input.bankCode}",
+        "period": "${workflow.input.period}",
+        "asOfDate": "${workflow.input.asOfDate}",
+        "lateSubmission": "${content_ref.output.lateSubmission}",
+        "daysToDeadline": "${content_ref.output.daysToDeadline}",
+        "expression": "(function(){var status=String($.submissionStatus||'');var code=String($.reportCode||'').toUpperCase();var period=String($.period||'').replace('-','');var bank=String($.bankCode||'');var channelMap={LBU:'ANTASENA',LSMK:'ANTASENA',LBBU:'ANTASENA',LHBU:'ANTASENA',LCR:'APOLO',NSFR:'APOLO',KPMM:'APOLO',BMPK:'APOLO',RBB:'APOLO'};var channel=channelMap[code]||'APOLO';var transmitted=(status==='APPROVED_FOR_TRANSMISSION'||status==='APPROVED_WITH_EXPLANATION'||status==='APPROVED_WITH_BREACH_DISCLOSURE');if(!transmitted){return {transmitted:false,channel:channel,receiptNumber:null,transmissionStatus:'NOT_TRANSMITTED',reason:'Laporan tidak disetujui untuk disampaikan - status '+status,lateSubmission:false,sanctionRisk:false};}var seed=String($.reportId||'')+code+period;var h=0;for(var i=0;i<seed.length;i++){h=(h*31+seed.charCodeAt(i))%100000;}var seq=String(h);while(seq.length<5){seq='0'+seq;}var receipt=channel+'/'+bank+'/'+code+'/'+period+'/'+seq;var late=($.lateSubmission===true||String($.lateSubmission)==='true');return {transmitted:true,channel:channel,receiptNumber:receipt,transmissionStatus:'TRANSMITTED_AWAITING_REGULATOR_ACCEPTANCE',receivedAt:String($.asOfDate||''),reason:'Berkas diterima antrian '+channel+' - status penerimaan final menunggu konfirmasi otoritas',lateSubmission:late,sanctionRisk:late,daysToDeadline:$.daysToDeadline};})();"
+      }
+    },
+    {
+      "name": "prepare_notification",
+      "taskReferenceName": "notify_ref",
+      "type": "INLINE",
+      "inputParameters": {
+        "evaluatorType": "graaljs",
+        "reportCode": "${workflow.input.reportCode}",
+        "reportName": "${workflow.input.reportName}",
+        "period": "${workflow.input.period}",
+        "preparedBy": "${workflow.input.preparedBy}",
+        "status": "${workflow.variables.submissionStatus}",
+        "route": "${workflow.variables.routeTaken}",
+        "receiptNumber": "${transmit_ref.output.result.receiptNumber}",
+        "channel": "${transmit_ref.output.result.channel}",
+        "errorsText": "${content_ref.output.errorsText}",
+        "memoPdf": "${memo_pdf_ref.output.result.location}",
+        "expression": "(function(){var status=String($.status||'');var name=String($.reportName||$.reportCode||'Laporan');var period=String($.period||'');var subject;var body;var recipients;if(status==='APPROVED_FOR_TRANSMISSION'||status==='APPROVED_WITH_EXPLANATION'){subject=name+' periode '+period+' telah disampaikan';body='Laporan '+name+' periode '+period+' telah dikirim melalui '+$.channel+' dengan nomor tanda terima '+$.receiptNumber+'. Status penerimaan final menunggu konfirmasi otoritas. Nota dinas terlampir.';recipients=['satuan-kerja-kepatuhan','pelaporan'];}else if(status==='APPROVED_WITH_BREACH_DISCLOSURE'){subject='PENTING - '+name+' periode '+period+' disampaikan dengan pengungkapan pelampauan';body='Laporan '+name+' periode '+period+' telah dikirim melalui '+$.channel+' (tanda terima '+$.receiptNumber+') disertai pengungkapan pelampauan rasio prudensial. Rencana tindak wajib dipantau sampai selesai.';recipients=['direktur-kepatuhan','satuan-kerja-kepatuhan','manajemen-risiko','komite-audit'];}else if(status==='RETURNED_TO_PREPARER'){subject='TINDAKAN DIPERLUKAN - '+name+' periode '+period+' dikembalikan';body='Laporan '+name+' periode '+period+' TIDAK disampaikan dan dikembalikan kepada '+String($.preparedBy||'penyusun')+' untuk perbaikan. Temuan: '+String($.errorsText||'-');recipients=['pelaporan',String($.preparedBy||'penyusun')];}else{subject=name+' periode '+period+' menunggu persetujuan';body='Laporan '+name+' periode '+period+' sedang menunggu persetujuan checker.';recipients=['satuan-kerja-kepatuhan'];}return {channel:'email',recipients:recipients,subject:subject,body:body,attachment:$.memoPdf,delivered:false};})();"
+      }
+    }
+  ],
+  "outputParameters": {
+    "reportId": "${workflow.input.reportId}",
+    "reportCode": "${workflow.input.reportCode}",
+    "reportName": "${workflow.input.reportName}",
+    "bankName": "${workflow.input.bankName}",
+    "period": "${workflow.input.period}",
+    "submissionStatus": "${workflow.variables.submissionStatus}",
+    "routeTaken": "${workflow.variables.routeTaken}",
+    "routeReason": "${route_ref.output.result.routeReason}",
+    "reviewDecision": "${workflow.variables.reviewDecision}",
+    "reviewedBy": "${workflow.variables.reviewedBy}",
+    "reviewNote": "${workflow.variables.reviewNote}",
+    "validationStatus": "${content_ref.output.validationStatus}",
+    "validationScore": "${content_ref.output.validationScore}",
+    "blockingErrors": "${content_ref.output.blockingErrors}",
+    "validationWarnings": "${content_ref.output.warnings}",
+    "daysToDeadline": "${content_ref.output.daysToDeadline}",
+    "lateSubmission": "${content_ref.output.lateSubmission}",
+    "car": "${ratios_ref.output.car}",
+    "requiredCar": "${ratios_ref.output.requiredCar}",
+    "minCarByProfile": "${ratios_ref.output.minCarByProfile}",
+    "capitalSurplusIDR": "${ratios_ref.output.capitalSurplusIDR}",
+    "cet1Ratio": "${ratios_ref.output.cet1Ratio}",
+    "tier1Ratio": "${ratios_ref.output.tier1Ratio}",
+    "nplGross": "${ratios_ref.output.nplGross}",
+    "nplNet": "${ratios_ref.output.nplNet}",
+    "rim": "${ratios_ref.output.rim}",
+    "lcr": "${ratios_ref.output.lcr}",
+    "nsfr": "${ratios_ref.output.nsfr}",
+    "complianceStatus": "${ratios_ref.output.complianceStatus}",
+    "breaches": "${ratios_ref.output.breaches}",
+    "breachSummary": "${ratios_ref.output.breachSummary}",
+    "remediationStatus": "${workflow.variables.remediationStatus}",
+    "transmission": "${transmit_ref.output.result}",
+    "receiptNumber": "${transmit_ref.output.result.receiptNumber}",
+    "transmittalMemoMarkdown": "${memo_ref.output.result}",
+    "transmittalMemoPdf": "${memo_pdf_ref.output.result.location}",
+    "notification": "${notify_ref.output.result}"
+  }
+}

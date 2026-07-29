@@ -1,0 +1,27 @@
+{
+  "name": "reporting-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Regulatory reporting console — local zero-dependency proxy (server.js) plus an Amplify Gen 2 deployment (static Hosting + Lambda proxy to Orkes Conductor).",
+  "main": "server.js",
+  "scripts": {
+    "local": "node server.js",
+    "start": "node server.js",
+    "sandbox": "ampx sandbox",
+    "sandbox:once": "ampx sandbox --once",
+    "deploy": "ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.4.0",
+    "@aws-amplify/backend-cli": "^1.2.6",
+    "@types/node": "^22.20.1",
+    "aws-cdk-lib": "^2.158.0",
+    "constructs": "^10.3.0",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}
