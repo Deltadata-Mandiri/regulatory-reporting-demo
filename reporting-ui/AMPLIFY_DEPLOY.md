@@ -62,6 +62,39 @@ Point an Amplify app at the repository and it will:
 
 Tear a sandbox down with `npx ampx sandbox delete`.
 
+### If the first build fails on "CDK bootstrap"
+
+The console's create-app flow does not always attach the service role, and the resulting
+error points somewhere misleading:
+
+```
+[BootstrapDetectionError] Unable to detect CDK bootstrap stack due to permission issues.
+  AccessDeniedException: User: arn:aws:sts::550167628141:assumed-role/
+  AemiliaControlPlaneLambda-CodeBuildRole-... is not authorized to perform:
+  ssm:GetParameter on .../cdk-bootstrap/hnb659fds/version
+```
+
+This is **not** a bootstrap problem. Check the account number in that ARN: `550167628141`
+is AWS's own Amplify service account, not yours. The build fell back to Amplify's default
+CodeBuild role because no service role was attached, and that role cannot read your
+account's SSM parameters — so bootstrap detection fails even when the region is bootstrapped
+perfectly well. Confirm with:
+
+```bash
+aws amplify get-app --app-id <appId> --region <region> --query 'app.iamServiceRoleArn'
+# null  -> this is the bug
+aws ssm get-parameter --name /cdk-bootstrap/hnb659fds/version --region <region>
+# returns a version -> the region really is bootstrapped
+```
+
+Fix it and rebuild:
+
+```bash
+aws amplify update-app --app-id <appId> --region <region> \
+  --iam-service-role-arn arn:aws:iam::<account>:role/amplify-<app>-deploy
+aws amplify start-job --app-id <appId> --branch-name main --job-type RELEASE --region <region>
+```
+
 ## The workflows still have to exist
 
 The proxy only orchestrates — it does not register anything. Create the four workflow
