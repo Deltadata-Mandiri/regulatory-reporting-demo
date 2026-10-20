@@ -203,17 +203,28 @@ $$('[data-raw]').forEach((b) => b.addEventListener('click', () => {
 }));
 
 /* ------------------------------------------------------------------- run */
+const KIT_CFG = window.DEMO_CONFIG || {};
+// The signed-in preparer is who "Disusun oleh" names at the checker's gate.
+const STAMP = (flow) => (flow === 'submission'
+  ? { preparedBy: DemoKit.actor(), requestedBy: DemoKit.actor() }
+  : { requestedBy: DemoKit.actor() });
+const LABEL = (p) => [p.reportCode || p.caseId, p.period, p.reportId].filter(Boolean).join(' · ');
+const OUTCOME = (wf) => { const o = wf.output || {}; return o.submissionStatus || o.remediationStatus || wf.status; };
+
 $$('[data-run]').forEach((b) => b.addEventListener('click', async () => {
   const flow = b.dataset.run;
   b.disabled = true; b.textContent = 'Menjalankan…';
   try {
+    // Who started it travels with the payload into the Orkes execution.
+    const payload = Object.assign({}, state.payload[flow], STAMP(flow));
     const { workflowId } = await api('/api/' + flow, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state.payload[flow]),
+      body: JSON.stringify(payload),
     });
+    DemoKit.track(workflowId, { workflow: state.flows[flow].workflow, flow, label: LABEL(payload) });
     state.wfid[flow] = workflowId;
-    $(`[data-wfid="${flow}"]`).textContent = workflowId;
+    $(`[data-wfid="${flow}"]`).innerHTML = DemoKit.execLink(workflowId);
     $(`[data-result="${flow}"]`).innerHTML = '';
     startPolling(flow);
   } catch (e) {
@@ -231,6 +242,8 @@ function startPolling(flow) {
       const wf = await api(`/api/${flow}/${state.wfid[flow]}`);
       renderTrace(flow, wf);
       renderResult(flow, wf);
+      $(`[data-result="${flow}"]`).insertAdjacentHTML('afterbegin', DemoKit.execBanner(wf.workflowId));
+      DemoKit.update(wf.workflowId, { status: wf.awaitingGate ? 'MENUNGGU: ' + wf.gate.label : OUTCOME(wf) });
       if (wf.status !== 'RUNNING' && wf.status !== 'PAUSED') clearInterval(state.poll[flow]);
       if (wf.awaitingGate) clearInterval(state.poll[flow]); // waiting on a human
     } catch (_) { clearInterval(state.poll[flow]); }
@@ -379,7 +392,15 @@ function renderResult(flow, wf) {
   const host = $(`[data-result="${flow}"]`);
   const o = wf.output || {};
 
-  if (wf.awaitingGate) { host.innerHTML = renderGate(flow, wf); wireGate(flow, wf); return; }
+  if (wf.awaitingGate) {
+    const rule = (KIT_CFG.gates || {})[wf.gate.ref] || {};
+    host.innerHTML = DemoKit.gate({
+      role: rule.role, fourEyes: rule.fourEyes, workflowId: wf.workflowId, flow, action: wf.gate.label,
+      html: renderGate(flow, wf),
+    });
+    wireGate(flow, wf);
+    return;
+  }
   if (wf.status === 'RUNNING') { host.innerHTML = '<p class="muted">Berjalan…</p>'; return; }
 
   if (flow === 'submission') return renderSubmission(host, wf, o);
@@ -497,7 +518,9 @@ function renderGate(flow, wf) {
     <div class="field"><span class="lbl">${esc(d)}</span><input type="text" data-gf="${esc(d)}" placeholder="YYYY-MM-DD" /></div>`).join('')
     + (g.strings || []).map((s) => s === 'note'
       ? `<div class="field wide"><span class="lbl">note</span><textarea rows="2" data-gf="note"></textarea></div>`
-      : `<div class="field"><span class="lbl">${esc(s)}</span><input type="text" data-gf="${esc(s)}" value="${esc((g.defaults || {})[s] || '')}" /></div>`
+      : (s === 'reviewedBy' || s === 'approvedBy')
+        ? `<div class="field"><span class="lbl">${esc(s)}</span><input type="text" data-gf="${esc(s)}" value="${esc(DemoKit.actor())}" readonly title="Diisi dari pengguna yang masuk" /></div>`
+        : `<div class="field"><span class="lbl">${esc(s)}</span><input type="text" data-gf="${esc(s)}" value="${esc((g.defaults || {})[s] || '')}" /></div>`
     ).join('');
 
   const ctx = kv([
@@ -544,6 +567,7 @@ function wireGate(flow, wf) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      DemoKit.acted(wf.workflowId, body.decision || body.outcome || wf.gate.label);
       startPolling(flow);
     } catch (e) {
       $('[data-gate-err]', host).innerHTML = `<div class="note bad">${esc(e.message)}</div>`;
@@ -573,7 +597,8 @@ async function loadQueue() {
           <span>${esc(it.reference)}</span>
           ${it.daysToDeadline != null ? `<span>sisa ${esc(it.daysToDeadline)} hari</span>` : ''}
           ${it.deadline ? `<span>tenggat ${esc(it.deadline)}</span>` : ''}
-          <span>${esc(it.workflowId)}</span>
+          ${DemoKit.execLink(it.workflowId)}
+          <span>pemutus: ${esc(DemoKit.roleLabel(((KIT_CFG.gates || {})[it.gate.ref] || {}).role || '—'))}</span>
         </div>
         ${it.reason ? `<div class="q-reason">${esc(it.reason)}</div>` : ''}
         <div class="q-actions">
@@ -595,7 +620,8 @@ $('#queueRefresh').addEventListener('click', loadQueue);
 function openExecution(flow, id, push) {
   if (!state.flows[flow]) return;
   state.wfid[flow] = id;
-  $(`[data-wfid="${flow}"]`).textContent = id;
+  DemoKit.seen(id, { workflow: state.flows[flow].workflow, flow });
+  $(`[data-wfid="${flow}"]`).innerHTML = DemoKit.execLink(id);
   $(`.tab[data-tab="${flow}"]`).click();
   if (push) history.replaceState(null, '', `?flow=${encodeURIComponent(flow)}&wf=${encodeURIComponent(id)}`);
   startPolling(flow);
@@ -615,6 +641,15 @@ function openExecution(flow, id, push) {
       state.presets[flow] = samples;
       renderPresets(flow);
     }
+    // Each run form belongs to a role; anyone else sees who to sign in as.
+    for (const [flow, role] of Object.entries(KIT_CFG.runRoles || {})) {
+      const card = $(`[data-run="${flow}"]`) && $(`[data-run="${flow}"]`).closest('.card');
+      DemoKit.gateEl(card, { role, action: 'Menjalankan ' + state.flows[flow].label });
+    }
+    DemoKit.onOpen((run) => {
+      const flow = run.flow || Object.keys(state.flows).find((k) => state.flows[k].workflow === run.workflow);
+      if (flow) openExecution(flow, run.id, true);
+    });
     const q = new URLSearchParams(location.search);
     if (q.get('flow') && q.get('wf')) openExecution(q.get('flow'), q.get('wf'), false);
     loadQueue();

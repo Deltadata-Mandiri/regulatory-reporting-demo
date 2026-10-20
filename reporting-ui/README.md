@@ -82,3 +82,19 @@ Static file serving is confined to `public/` by a normalised-prefix check.
 - Polling is a 1.5s interval, and stops as soon as an execution finishes or parks on a gate.
 - A remediation started as a **child** of a submission also appears in the queue. That is
   deliberate: its Board gate is real work regardless of who started it.
+
+## Sample users
+
+Sign in as any of these — password `bdn-demo` for all. The persona decides which
+panels unlock and whose name the workflow records; a user cannot approve an
+execution they started (maker–checker). Every run links to its Orkes execution.
+Personas live in `public/demo-config.js`; the shared kit is described in
+`template-usecase/_kit/README.md`.
+
+| Username | Name | Title | Role |
+|---|---|---|---|
+| `nadia` | Nadia Putri | Staf Pelaporan Regulator | Staf Pelaporan (Maker) |
+| `irawan` | Irawan Saputro | Kepala Satuan Kerja Kepatuhan | Kepala SKK Kepatuhan |
+| `kartika` | Kartika Sari | Direktur Kepatuhan | Direktur Kepatuhan |
+| `linda` | Linda Gunawan | Direktur Manajemen Risiko | Komite Manajemen Risiko |
+| `budi` | Budi Hartanto | Direktur Utama | Direksi |

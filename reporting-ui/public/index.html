@@ -5,9 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BDN · Konsol Pelaporan Regulator</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="demo-kit.css" />
+  <script src="demo-config.js"></script>
+  <script src="demo-kit.js"></script>
 </head>
 <body>
-  <header class="topbar">
+  <header class="topbar" data-kit-replace>
     <div class="brand">
       <span class="logo">BDN</span>
       <div class="brand-text">
@@ -106,8 +109,9 @@
 
   <footer class="footer">
     <span>PT Bank Delta Nusantara dan seluruh angka pada demo ini <strong>fiktif</strong>. Konsol ini prototipe
-    tanpa autentikasi — <code>reviewedBy</code> dan <code>approvedBy</code> masih teks bebas dan harus diikat ke
-    identitas SSO, dengan pemisahan maker–checker yang ditegakkan, sebelum dipakai sungguhan.</span>
+    tanpa autentikasi — pengguna sampel adalah simulasi. <code>reviewedBy</code> dan <code>approvedBy</code> diisi
+    dari pengguna yang masuk dan pemisahan maker–checker ditegakkan di konsol, tetapi keduanya harus diikat ke
+    identitas SSO dan ditegakkan di server sebelum dipakai sungguhan.</span>
   </footer>
 
   <script src="app.js"></script>
